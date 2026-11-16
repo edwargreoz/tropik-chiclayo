@@ -212,3 +212,16 @@ footer small{display:block;margin-top:1rem;opacity:.8;grid-column:1/-1}
 .fab{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));z-index:60;width:60px;height:60px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;box-shadow:0 10px 24px rgba(0,0,0,.3);text-decoration:none;border:2px solid #fff}
 .fab svg{width:30px;height:30px}
 @media (hover:hover) and (pointer:fine){.fab:hover{background:var(--berry)}}
+
+/* Selector de ubicación (delivery) */
+.pick{display:grid;gap:.6rem}
+.pick[hidden]{display:none}
+.pick-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem}
+.pick-title{font-size:.82rem;font-weight:600;color:var(--ink-2)}
+.pick-actions{display:flex;flex-wrap:wrap;gap:.5rem}
+.pick-actions .btn{min-height:44px;font-size:.92rem;padding:0 1rem}
+.pick-map{position:relative;z-index:0;isolation:isolate;height:clamp(260px,38vw,340px);border-radius:16px;border:1.5px solid var(--line);overflow:hidden;background:#e9e4d8}
+.pick-status{font-size:.92rem;color:var(--ink-2)}
+.pick-status.ok{color:#1d6b3a;font-weight:500}
+.pick-status.bad{color:#a3182f;font-weight:500}
+.leaflet-container{font-family:var(--f-body)}

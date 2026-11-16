@@ -40,6 +40,14 @@
   const mDel = $('#m-del'), mRec = $('#m-rec');
   const cName = $('#c-name'), cDist = $('#c-district'), cAddr = $('#c-addr');
 
+  // Zona de delivery: Chiclayo, José Leonardo Ortiz y La Victoria (aprox.)
+  const BOUNDS = { s: -6.8, n: -6.72, w: -79.9, e: -79.8 };
+  const CENTER = [-6.7714, -79.8409];
+  let pin = null;                                    // { lat, lng }
+  const inZone = q => q && q.lat >= BOUNDS.s && q.lat <= BOUNDS.n && q.lng >= BOUNDS.w && q.lng <= BOUNDS.e;
+  const pickBox = $('#pick'), pickStatus = $('#pick-status'), pickClear = $('#pick-clear'), pickGps = $('#pick-gps');
+  let map = null, marker = null;
+
   let lines = [{ type: 'cremolada', flavor: 'fresa', size: '16', qty: 1 }];
   let untouched = true;
 
@@ -96,7 +104,7 @@
     sDeliv.classList.toggle('ok', canDeliver);
     if (canDeliver) {
       sDeliv.textContent = delivery
-        ? 'Delivery en Chiclayo habilitado. Indica tu dirección para enviarlo.'
+        ? 'Delivery en Chiclayo habilitado. Escribe tu dirección y marca tu ubicación en el mapa.'
         : '¡Ya calificas para delivery en Chiclayo! Elige Delivery en «Tus datos» o recoge en tienda.';
     } else {
       const falta = (MIN_DELIVERY_L - liters).toFixed(1);
@@ -105,10 +113,14 @@
         : `Te faltan ${falta} L para delivery. Mientras tanto, recoge en Pasaje Agustín Arbulu Neyra #161.`;
     }
 
-    const missingAddr = delivery && !cAddr.value.trim();
-    const blocked = items === 0 || missingAddr;
+    const missingAddr = delivery && !cAddr.value.trim() && !pin;
+    const outside = delivery && pin && !inZone(pin);
+    const blocked = items === 0 || missingAddr || outside;
     sWa.setAttribute('aria-disabled', blocked ? 'true' : 'false');
-    if (missingAddr) sDeliv.textContent += ' Falta la dirección.';
+    if (missingAddr) sDeliv.textContent += ' Falta la dirección o marcar tu ubicación en el mapa.';
+    if (outside) sDeliv.textContent += ' El pin está fuera de la zona de delivery (solo Chiclayo).';
+    pickBox.hidden = !delivery;
+    if (delivery) ensureMap();
 
     const rows = lines.map(l => `• ${l.qty} × ${lineLabel(l)} — ${money(unitPrice(l) * l.qty)}`);
     const msg = [
@@ -119,7 +131,8 @@
       `Modalidad: ${delivery ? 'Delivery' : 'Recojo en tienda'}`,
       cName.value.trim() ? `Nombre: ${cName.value.trim()}` : null,
       delivery ? `Distrito: ${cDist.value}` : null,
-      delivery && cAddr.value.trim() ? `Dirección: ${cAddr.value.trim()}` : null
+      delivery && cAddr.value.trim() ? `Dirección: ${cAddr.value.trim()}` : null,
+      delivery && pin && inZone(pin) ? `Ubicación en mapa: https://www.google.com/maps?q=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}` : null
     ].filter(Boolean).join('\n');
     sWa.href = blocked ? '#pedido' : `https://wa.me/${WA}?text=${encodeURIComponent(msg)}`;
     if (blocked) sWa.removeAttribute('target'); else sWa.setAttribute('target', '_blank');
@@ -157,7 +170,54 @@
     untouched = false; render();
     document.getElementById('pedido').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }));
-  sWa.addEventListener('click', e => { if (sWa.getAttribute('aria-disabled') === 'true') { e.preventDefault(); (!cAddr.value.trim() && mDel.checked ? cAddr : addBtn).focus(); } });
+  sWa.addEventListener('click', e => { if (sWa.getAttribute('aria-disabled') === 'true') { e.preventDefault(); (mDel.checked && !pin && !cAddr.value.trim() ? cAddr : addBtn).focus(); } });
+
+  /* ---------- Selector de ubicación en mapa (Leaflet + OpenStreetMap) ---------- */
+  function setPin(lat, lng, pan) {
+    pin = { lat, lng };
+    if (marker) marker.setLatLng([lat, lng]);
+    else {
+      marker = L.marker([lat, lng], { draggable: true, keyboard: true, title: 'Arrastra para ajustar tu ubicación' }).addTo(map);
+      marker.on('dragend', () => { const q = marker.getLatLng(); setPin(q.lat, q.lng, false); });
+    }
+    if (pan) map.setView([lat, lng], Math.max(map.getZoom(), 17));
+    pickClear.hidden = false;
+    if (inZone(pin)) {
+      pickStatus.className = 'pick-status ok';
+      pickStatus.textContent = 'Ubicación marcada. Se enviará con tu pedido; puedes arrastrar el pin para afinarla.';
+    } else {
+      pickStatus.className = 'pick-status bad';
+      pickStatus.textContent = 'Ese punto está fuera de la zona de delivery. Solo atendemos Chiclayo, José Leonardo Ortiz y La Victoria.';
+    }
+    totals();
+  }
+  function clearPin() {
+    pin = null; if (marker) { marker.remove(); marker = null; }
+    pickClear.hidden = true; pickStatus.className = 'pick-status';
+    pickStatus.textContent = 'Toca el mapa o arrastra el pin hasta tu puerta. Así el repartidor llega más rápido.';
+    totals();
+  }
+  function ensureMap() {
+    if (map) { setTimeout(() => map.invalidateSize(), 0); return; }
+    if (typeof L === 'undefined') {                  // Leaflet aún no cargó o está bloqueado
+      pickStatus.textContent = 'No se pudo cargar el mapa. Escribe tu dirección y referencia arriba.'; return;
+    }
+    map = L.map('pick-map', { center: CENTER, zoom: 14, minZoom: 12, maxZoom: 19,
+      maxBounds: [[BOUNDS.s - .05, BOUNDS.w - .05], [BOUNDS.n + .05, BOUNDS.e + .05]], maxBoundsViscosity: .8 });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
+    map.on('click', e => setPin(e.latlng.lat, e.latlng.lng, false));
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+  pickClear.addEventListener('click', clearPin);
+  pickGps.addEventListener('click', () => {
+    ensureMap();
+    if (!navigator.geolocation) { pickStatus.className = 'pick-status bad'; pickStatus.textContent = 'Tu navegador no permite ubicarte. Toca el mapa para marcar el punto.'; return; }
+    pickStatus.className = 'pick-status'; pickStatus.textContent = 'Buscando tu ubicación…';
+    navigator.geolocation.getCurrentPosition(
+      pos => setPin(pos.coords.latitude, pos.coords.longitude, true),
+      () => { pickStatus.className = 'pick-status bad'; pickStatus.textContent = 'No pudimos obtener tu ubicación. Toca el mapa para marcar el punto.'; },
+      { enableHighAccuracy: true, timeout: 10000 });
+  });
 
   render();
 
